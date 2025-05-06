@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Atari Antic Displaylist Designer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <style>
+        .canvas-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        canvas {
+            max-width: 100%;
+            max-height: 100%;
+            aspect-ratio: 4 / 3;
+            border: 1px solid #d1d5db;
+        }
+
+        [draggable="true"] {
+            cursor: move;
+        }
+
+        .resize-divider {
+            background: #d1d5db;
+            cursor: col-resize;
+        }
+
+        .resize-divider-horizontal {
+            background: #d1d5db;
+            cursor: row-resize;
+        }
+
+        .sticky-button {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: white;
+            padding-bottom: 1rem;
+        }
+    </style>
+</head>
+
+<body class="font-sans bg-gray-100 p-4 flex flex-col h-screen">
+    <div class="flex flex-row justify-between mb-2 p-2 bg-gray-800 text-white">
+        <h1 class="text-2xl font-bold mb-4">Atari Antic Displaylist Designer</h1>
+        <h3 class="text-sm mb-4">Chris Worton 2025</h3>
+    </div>
+    <!-- Top section: List and Visual panes -->
+    <div class="flex flex-1 gap-0 mb-0 min-h-0" id="topSection">
+        <!-- List Pane -->
+        <div class="bg-white border border-gray-300 rounded-l-lg shadow p-4 overflow-y-auto" style="flex: 1"
+            id="listPane">
+            <div x-data="listManager()">
+                <!-- Add Row Button (Sticky) -->
+                <div class="sticky-button">
+                    <button @click="addRow()"
+                        class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 w-full">Add Row</button>
+                </div>
+                <template x-for="(row, index) in displayList" :key="index">
+                    <div class="flex items-center gap-2 p-2 border-b border-gray-200 hover:bg-gray-50" draggable="true"
+                        @dragstart="startDrag($event, index)" @dragover="dragOver($event)" @drop="drop($event, index)">
+                        <!-- Left-side elements -->
+                        <div class="flex items-center gap-2 flex-1">
+                            <!-- Drag Handle -->
+                            <template x-if="row.mode !== 0x41">
+                                <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M4 8h16M4 16h16"></path>
+                                </svg>
+                            </template>
+                            <template x-if="row.mode === 0x41">
+                                <div class="w-5 h-5"></div>
+                            </template>
+                            <!-- Mode Dropdown -->
+                            <template x-if="row.mode !== 0x41">
+                                <select class="border rounded px-2 py-1 text-sm" :value="row.mode"
+                                    @change="updateRow(index, 'mode', $event.target.value)">
+                                    <template x-for="mode in anticModes">
+                                        <template x-if="mode.value !== 0x41">
+                                            <option :value="mode.value" x-text="mode.desc"
+                                                :selected="mode.value === row.mode"></option>
+                                        </template>
+                                    </template>
+                                </select>
+                            </template>
+
+                            <template x-if="row.mode === 0x41">
+                                <span class="text-sm border rounded px-2 py-1">Jump & Wait Vertical Blank</span>
+                            </template>
+
+                            <!-- Checkboxes -->
+                            <template x-if="row.mode !== 0x41">
+                                <label class="flex items-center gap-1 text-sm">
+                                    <input type="checkbox" x-model="row.lms"
+                                        @change="updateRow(index, 'lms', $event.target.checked)"> LMS
+                                </label>
+                            </template>
+                            <template x-if="row.mode !== 0x41">
+                                <label class="flex items-center gap-1 text-sm">
+                                    <input type="checkbox" x-model="row.dli"
+                                        @change="updateRow(index, 'dli', $event.target.checked)"> DLI
+                                </label>
+                            </template>
+                            <template x-if="row.mode !== 0x41">
+                                <label class="flex items-center gap-1 text-sm">
+                                    <input type="checkbox" x-model="row.vscroll"
+                                        @change="updateRow(index, 'vscroll', $event.target.checked)"> VS
+                                </label>
+                            </template>
+                            <template x-if="row.mode !== 0x41">
+                                <label class="flex items-center gap-1 text-sm">
+                                    <input type="checkbox" x-model="row.hscroll"
+                                        @change="updateRow(index, 'hscroll', $event.target.checked)"> HS
+                                </label>
+                            </template>
+
+                            <!-- Address Input -->
+                            <template x-if="row.lms || row.mode === 0x41">
+                                <input type="text" class="border rounded px-2 py-1 text-sm w-20" :value="row.address"
+                                    placeholder="Address" @input="updateRow(index, 'address', $event.target.value)">
+                            </template>
+                        </div>
+                        <!-- Duplicate Button (Down arrows Icon)  (not available for JVB line)-->
+                        <template x-if="row.mode !== 0x41">
+                            <button @click="duplicateRow(index)" class="text-red-500 hover:text-red-700 text-lg ml-auto"
+                                title="Duplicate">&#x23EC;
+
+                            </button>
+                        </template>
+                        <!-- Delete Button (Trashcan Icon)  (not available for JVB line)-->
+                        <template x-if="row.mode !== 0x41">
+                            <button @click="removeRow(index)" class="text-red-500 hover:text-red-700 text-lg ml-auto"
+                                title="Delete">🗑️</button>
+                        </template>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- Vertical Divider (Top) -->
+        <div class="w-2 resize-divider" id="verticalDividerTop"></div>
+
+        <!-- Visual Pane -->
+        <div class="bg-gray-800 border border-gray-300 rounded-r-lg shadow p-4 flex flex-col" style="flex: 1"
+            id="visualPane">
+            <div class="canvas-container flex-1">
+                <canvas id="visualCanvas"></canvas>
+            </div>
+            <div id="key" class="flex flex-row border-gray-200 text-white mt-4">
+                <div class="flex-1 flex items-center justify-center">
+                    <div class="w-4 h-4 bg-[#0C3A6E] border border-gray-300 rounded mr-2"></div>
+                    <span class="text-sm">Text Mode</span>
+                </div>
+                <div class="flex-1 flex items-center justify-center">
+                    <div class="w-4 h-4 bg-[#c5b133] border border-gray-300 rounded mr-2"></div>
+                    <span class="text-sm">Graphics Mode</span>
+                </div>
+                <div class="flex-1 flex items-center justify-center">
+                    <div class="w-4 h-4 bg-[#000000] border border-gray-300 rounded mr-2"></div>
+                    <span class="text-sm">Instruction/Blank</span>
+                </div>
+                <div class="flex-1 flex items-center justify-center">
+                    <div class="w-4 h-4 bg-[#400000] border border-gray-300 rounded mr-2"></div>
+                    <span class="text-sm">Overscan area</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Horizontal Divider -->
+    <div class="h-2 resize-divider-horizontal" id="horizontalDivider"></div>
+
+    <!-- Bottom section: Code and Summary panes -->
+    <div class="flex flex-1 gap-0 min-h-0" id="bottomSection">
+        <!-- Code Pane -->
+        <div class="bg-white border border-gray-300 rounded-l-lg shadow p-4 overflow-y-auto" style="flex: 1"
+            id="codePane">
+            <pre id="codeOutput" class="bg-gray-50 p-2 rounded text-sm font-mono overflow-x-auto"></pre>
+        </div>
+
+        <!-- Vertical Divider (Bottom) -->
+        <div class="w-2 resize-divider" id="verticalDividerBottom"></div>
+
+        <!-- Summary Information Pane -->
+        <div class="bg-white border border-gray-300 rounded-r-lg shadow p-4 overflow-y-auto" style="flex: 1"
+            id="summaryPane">
+            <div class="text-sm">
+                <p><strong>Scan Lines Used:</strong> <span id="scanLinesUsed">0</span></p>
+                <p><strong>Bytes in DLIST:</strong> <span id="byteCount">0</span></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ANTIC mode data
+        const anticModes = [
+            { value: 0x02, scanLines: 8, desc: "Mode 2 (40 text, 8 scan lines)" },
+            { value: 0x03, scanLines: 10, desc: "Mode 3 (40 text, 10 scan lines)" },
+            { value: 0x04, scanLines: 8, desc: "Mode 4 (40 text, 8 scan lines)" },
+            { value: 0x05, scanLines: 16, desc: "Mode 5 (40 text, 16 scan lines)" },
+            { value: 0x06, scanLines: 8, desc: "Mode 6 (20 text, 8 scan lines)" },
+            { value: 0x07, scanLines: 16, desc: "Mode 7 (20 text, 16 scan lines)" },
+            { value: 0x08, scanLines: 8, desc: "Mode 8 (40 pixels, 8 scan lines)" },
+            { value: 0x09, scanLines: 4, desc: "Mode 9 (80 pixels, 4 scan lines)" },
+            { value: 0x0A, scanLines: 4, desc: "Mode A (80 pixels, 4 scan lines)" },
+            { value: 0x0B, scanLines: 2, desc: "Mode B (160 pixels, 2 scan lines)" },
+            { value: 0x0C, scanLines: 2, desc: "Mode C (160 pixels, 2 scan lines)" },
+            { value: 0x0D, scanLines: 1, desc: "Mode D (160 pixels, 1 scan line)" },
+            { value: 0x0E, scanLines: 1, desc: "Mode E (160 pixels, 1 scan line)" },
+            { value: 0x0F, scanLines: 1, desc: "Mode F (320 pixels, 1 scan line)" },
+            { value: 0x00, scanLines: 1, desc: "Blank 1 scan line" },
+            { value: 0x10, scanLines: 2, desc: "Blank 2 scan lines" },
+            { value: 0x20, scanLines: 3, desc: "Blank 3 scan lines" },
+            { value: 0x30, scanLines: 4, desc: "Blank 4 scan lines" },
+            { value: 0x40, scanLines: 5, desc: "Blank 5 scan lines" },
+            { value: 0x50, scanLines: 6, desc: "Blank 6 scan lines" },
+            { value: 0x60, scanLines: 7, desc: "Blank 7 scan lines" },
+            { value: 0x70, scanLines: 8, desc: "Blank 8 scan lines" },
+            { value: 0x41, scanLines: 0, desc: "JVB (Jump and Wait for VBLANK)" }
+        ];
+
+        // component for list management
+        function listManager() {
+            return {
+                displayList: [
+                    { mode: 0x70, lms: false, dli: false, vscroll: false, hscroll: false, address: "0000" },
+                    { mode: 0x70, lms: false, dli: false, vscroll: false, hscroll: false, address: "0000" },
+                    { mode: 0x70, lms: false, dli: false, vscroll: false, hscroll: false, address: "0000" },
+                    { mode: 0x02, lms: true, dli: false, vscroll: false, hscroll: false, address: "4000" },
+                    { mode: 0x41, lms: true, dli: false, vscroll: false, hscroll: false, address: "1000" }
+                ],
+                anticModes,
+                draggedIndex: null,
+
+                addRow() {
+                    // Find the index of the JVB row (mode 0x41)
+                    const jvbIndex = this.displayList.findIndex(row => row.mode === 0x41);
+
+
+                    const newRow = {
+                        mode: 0x02,
+                        lms: false,
+                        dli: false,
+                        vscroll: false,
+                        hscroll: false,
+                        address: "0000"
+                    };
+
+                    if (jvbIndex !== -1) {
+                        // Insert new row before the JVB row
+                        this.displayList.splice(jvbIndex, 0, newRow);
+                    } else {
+                        // If no JVB row, append to the end (fallback)
+                        this.displayList.push(newRow);
+                    }
+                    this.update();
+                },
+
+                removeRow(index) {
+                    if (this.displayList.length > 1) {
+                        this.displayList.splice(index, 1);
+                        this.update();
+                    }
+                },
+
+                updateRow(index, field, value) {
+                    if (field === "mode") {
+                        this.displayList[index].mode = parseInt(value);
+                        if (this.displayList[index].mode === 0x41) {
+                            this.displayList[index].lms = true; // JVB requires address
+                        }
+                    } else if (field === "address") {
+                        this.displayList[index].address = value;
+                    } else {
+                        this.displayList[index][field] = value;
+                    }
+                    this.update();
+                },
+
+                duplicateRow(index) {
+                    const newRow = { ...this.displayList[index] };
+                    this.displayList.splice(index + 1, 0, newRow);
+                    this.update();
+                },
+
+                startDrag(event, index) {
+                    // prevent drag on JVB line
+                    if (this.displayList[index].mode === 0x41) {
+                        event.preventDefault();
+                        return;
+                    }
+                    this.draggedIndex = index;
+                    event.dataTransfer.setData("text/plain", index);
+                },
+
+                dragOver(event) {
+                    event.preventDefault();
+                },
+
+                drop(event, targetIndex) {
+                    event.preventDefault();
+                    if (this.draggedIndex !== null && this.draggedIndex !== targetIndex) {
+                        // if target index is the last row, cancel the drop. JVB must be last row.
+                        if (targetIndex !== (this.displayList.length - 1)) {
+                            const [draggedItem] = this.displayList.splice(this.draggedIndex, 1);
+                            this.displayList.splice(targetIndex, 0, draggedItem);
+                            this.update();
+                        }
+                    }
+                    this.draggedIndex = null;
+                },
+
+                update() {
+                    updateVisual(this.displayList);
+                    updateCode(this.displayList);
+                    updateSummary(this.displayList);
+                }
+            };
+        }
+
+        // Visual update function
+        function updateVisual(displayList) {
+            const canvas = document.getElementById("visualCanvas");
+            const ctx = canvas.getContext("2d");
+            const container = canvas.parentElement; // canvas-container
+
+            // Get container dimensions, accounting for padding
+            const containerWidth = container.offsetWidth;
+            const containerHeight = container.offsetHeight;
+            const aspectRatio = 4 / 3;
+
+            // Calculate canvas dimensions to fit container while maintaining 4:3 aspect ratio
+            let canvasWidth, canvasHeight;
+            if (containerWidth / containerHeight > aspectRatio) {
+                canvasHeight = containerHeight;
+                canvasWidth = canvasHeight * aspectRatio;
+            } else {
+                canvasWidth = containerWidth;
+                canvasHeight = canvasWidth / aspectRatio;
+            }
+
+            // Ensure canvas doesn't exceed container bounds
+            canvasWidth = Math.min(canvasWidth, containerWidth);
+            canvasHeight = Math.min(canvasHeight, containerHeight);
+
+            // Set canvas dimensions (use floor to avoid subpixel issues)
+            canvas.width = Math.floor(canvasWidth);
+            canvas.height = Math.floor(canvasHeight);
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw black background for unassigned scan lines
+            ctx.fillStyle = "#202020";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Scale for 240 scan lines
+            const scale = canvas.height / 240; // Pixels per scan line
+            const totalScanLines = 240;
+
+            // Draw display list
+            let y = 0; // Start at top of canvas
+            let totalUsedScanLines = 0;
+            displayList.forEach(row => {
+                const mode = anticModes.find(m => m.value === row.mode);
+                const scanLines = mode.scanLines;
+                totalUsedScanLines += scanLines;
+                if (totalUsedScanLines <= totalScanLines) {
+                    const height = scanLines * scale;
+
+                    if (row.mode & 0x0F) { // mode line
+                        if (row.mode & 0x08) { // graphics
+                            ctx.fillStyle = "#c5b133";
+                        } else { // text
+                            ctx.fillStyle = "#0C3A6E";
+                        }
+                    } else { // instruction or blank line
+                        ctx.fillStyle = "#000000";
+                    }
+
+                    ctx.fillRect(0, y, canvas.width, height);
+
+                    if (row.dli === true) {
+                        ctx.fillStyle = "#FFFFFF";
+                        ctx.fillRect(canvas.width - 40, y, 8, height);
+                    }
+                    if (row.vscroll === true) {
+                        ctx.fillStyle = "#FFFFFF";
+                        ctx.fillRect(canvas.width - 24, y, 8, height);
+                    }
+                    if (row.hscroll === true) {
+                        ctx.fillStyle = "#FFFFFF";
+                        ctx.fillRect(canvas.width - 8, y, 8, height);
+                    }
+
+                    if (row.mode == 0x41) {
+                        ctx.fillStyle = "#FFFFFF";
+                        ctx.font = `${Math.min(12, scale * 6)}px Arial`;
+                        ctx.fillText(mode.desc, 5, y + Math.min(14, scale * 7));
+                    }
+
+                    y += height;
+                } else {
+                    // If scan lines exceed 240, stop drawing
+                    console.warn("Display list exceeds 240 scan lines.");
+                    return;
+                }
+
+
+            });
+
+            // Draw danger zones for overscan
+            ctx.fillStyle = "rgba(255, 0, 0, 0.2)";
+            ctx.fillRect(0, 0, canvas.width, 24 * scale); // Top overscan
+            ctx.fillRect(0, (totalScanLines - 24) * scale, canvas.width, 24 * scale); // Bottom overscan
+
+            // draw vertical regions to represenr dli, hscroll and vscroll flags
+            ctx.fillStyle = "#FFFFFF20";
+            ctx.fillRect(canvas.width - 40, 0, 8, canvas.height);
+            ctx.fillRect(canvas.width - 24, 0, 8, canvas.height);
+            ctx.fillRect(canvas.width - 8, 0, 8, canvas.height);
+
+            ctx.fillStyle = "#FFFFFF";
+            ctx.font = `${Math.min(12, scale * 6)}px Arial`;
+            ctx.fillText("D", canvas.width - 40, 12);
+            ctx.fillText("V", canvas.width - 24, 12);
+            ctx.fillText("H", canvas.width - 8, 12);
+
+        }
+
+        // Code update function
+        function updateCode(displayList) {
+            let output = "; Atari Antic Display List\nDLIST\n";
+            displayList.forEach(row => {
+                const mode = anticModes.find(m => m.value === row.mode);
+                let byte = row.mode;
+                if (row.lms) byte |= 0x40;
+                if (row.dli) byte |= 0x80;
+                if (row.vscroll) byte |= 0x20;
+                if (row.hscroll) byte |= 0x10;
+                let line = `    .byte $${byte.toString(16).padStart(2, "0").toUpperCase()}`;
+                if (row.lms || row.mode === 0x41) {
+                    const addr = parseInt(row.address, 16) || 0;
+                    const low = addr & 0xFF;
+                    const high = (addr >> 8) & 0xFF;
+                    line += `, $${low.toString(16).padStart(2, "0").toUpperCase()}, $${high.toString(16).padStart(2, "0").toUpperCase()}`;
+                }
+                line += ` ; ${mode.desc}`;
+                if (row.lms) line += `, LMS $${row.address}`;
+                if (row.dli) line += ", DLI";
+                if (row.vscroll) line += ", VSCROLL";
+                if (row.hscroll) line += ", HSCROLL";
+                output += line + "\n";
+            });
+            document.getElementById("codeOutput").textContent = output;
+        }
+
+        // Summary update function
+        function updateSummary(displayList) {
+            const scanLinesUsed = displayList.reduce((sum, row) => {
+                const mode = anticModes.find(m => m.value === row.mode);
+                return sum + (mode.scanLines || 0);
+            }, 0);
+            const byteCount = displayList.reduce((sum, row) => {
+                return sum + 1 + ((row.lms || row.mode === 0x41) ? 2 : 0);
+            }, 0);
+            document.getElementById("scanLinesUsed").textContent = scanLinesUsed;
+            document.getElementById("byteCount").textContent = byteCount;
+        }
+
+        // Resizable panes
+        function setupResizers() {
+            // Top vertical divider (List vs Visual)
+            const verticalDividerTop = document.getElementById("verticalDividerTop");
+            const listPane = document.getElementById("listPane");
+            const visualPane = document.getElementById("visualPane");
+
+            verticalDividerTop.addEventListener("mousedown", (e) => {
+                e.preventDefault();
+                document.addEventListener("mousemove", resizeTopVertical);
+                document.addEventListener("mouseup", stopResize);
+            });
+
+            function resizeTopVertical(e) {
+                const container = document.getElementById("topSection");
+                const containerRect = container.getBoundingClientRect();
+                const newListWidth = e.clientX - containerRect.left;
+                const newVisualWidth = containerRect.width - newListWidth - verticalDividerTop.offsetWidth;
+                if (newListWidth > 100 && newVisualWidth > 100) {
+                    listPane.style.flex = `0 0 ${newListWidth}px`;
+                    visualPane.style.flex = `0 0 ${newVisualWidth}px`;
+                    updateVisual(listManager().displayList); // Redraw canvas
+                }
+            }
+
+            // Bottom vertical divider (Code vs Summary)
+            const verticalDividerBottom = document.getElementById("verticalDividerBottom");
+            const codePane = document.getElementById("codePane");
+            const summaryPane = document.getElementById("summaryPane");
+            /*
+                        verticalDividerBottom.addEventListener("mousedown", (e) => {
+                            e.preventDefault();
+                            document.addEventListener("mousemove", resizeBottomVertical);
+                            document.addEventListener("mouseup", stopResize);
+                        });
+            */
+            function resizeBottomVertical(e) {
+                const container = document.getElementById("bottomSection");
+                const containerRect = container.getBoundingClientRect();
+                const newCodeWidth = e.clientX - containerRect.left;
+                const newSummaryWidth = containerRect.width - newCodeWidth - verticalDividerBottom.offsetWidth;
+                if (newCodeWidth > 100 && newSummaryWidth > 100) {
+                    codePane.style.flex = `0 0 ${newCodeWidth}px`;
+                    summaryPane.style.flex = `0 0 ${newSummaryWidth}px`;
+                }
+            }
+
+            // Horizontal divider (Top vs Bottom)
+            const horizontalDivider = document.getElementById("horizontalDivider");
+            const topSection = document.getElementById("topSection");
+            const bottomSection = document.getElementById("bottomSection");
+            /*
+                        horizontalDivider.addEventListener("mousedown", (e) => {
+                            e.preventDefault();
+                            document.addEventListener("mousemove", resizeHorizontal);
+                            document.addEventListener("mouseup", stopResize);
+                        });
+            */
+            function resizeHorizontal(e) {
+                const container = document.body;
+                const containerRect = container.getBoundingClientRect();
+                const newTopHeight = e.clientY - containerRect.top - 60; // Adjust for header
+                const newBottomHeight = containerRect.height - newTopHeight - horizontalDivider.offsetHeight - 60;
+                if (newTopHeight > 100 && newBottomHeight > 100) {
+                    topSection.style.height = `${newTopHeight}px`;
+                    bottomSection.style.height = `${newBottomHeight}px`;
+                    updateVisual(listManager().displayList); // Redraw canvas
+                }
+            }
+
+            function stopResize() {
+                document.removeEventListener("mousemove", resizeTopVertical);
+                document.removeEventListener("mousemove", resizeBottomVertical);
+                document.removeEventListener("mousemove", resizeHorizontal);
+                document.removeEventListener("mouseup", stopResize);
+            }
+        }
+
+        // Initial render
+        document.addEventListener("DOMContentLoaded", () => {
+            const initialList = listManager().displayList;
+            updateVisual(initialList);
+            updateCode(initialList);
+            updateSummary(initialList);
+            setupResizers();
+        });
+    </script>
+</body>
+
+</html>
